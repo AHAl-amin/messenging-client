@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import axios from 'axios';
 import { Send, User as UserIcon, ArrowLeft, LogOut } from 'lucide-react';
+import { FiChevronLeft } from "react-icons/fi";
 
 import { BACKEND_URL } from '../../lib/api';
 const socket = io(BACKEND_URL);
@@ -252,13 +253,20 @@ const Messenger = () => {
             <div className={`w-full md:w-80 bg-white border-r border-gray-200 flex flex-col ${selectedUserId ? 'hidden md:flex' : 'flex'}`}>
                 {/* Sidebar Header */}
                 <div className="p-4 border-b border-gray-200 bg-gray-50 flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-lg">
-                            {currentUser.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                            <h2 className="font-semibold text-gray-800">{currentUser.name}</h2>
-                            <p className="text-xs text-green-500 font-medium">Online</p>
+                    <div className='flex items-center gap-2'>
+                        <button
+                            onClick={() => navigate('/')}
+                        >
+                            <FiChevronLeft className='size-6 font-bold text-gray-400 cursor-pointer' />
+                        </button>
+                        <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-lg">
+                                {currentUser.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                                <h2 className="font-semibold text-gray-800">{currentUser.name}</h2>
+                                <p className="text-xs text-green-500 font-medium">Online</p>
+                            </div>
                         </div>
                     </div>
                     <button

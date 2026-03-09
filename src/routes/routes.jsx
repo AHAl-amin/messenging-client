@@ -9,6 +9,7 @@ import OTP_Verification from "../Pages/Authentication/OTP_Verification";
 import ResetPassword from "../Pages/Authentication/ResetPassword";
 import Admin_Home from "../Layout/Admin/Admin_Home";
 import Messenger from "../Pages/Messenger/Messenger";
+import ChatAI from "../Pages/ChatAI/ChatAI";
 
 
 export const router = createBrowserRouter([
@@ -16,7 +17,8 @@ export const router = createBrowserRouter([
     path: "/",
     element: <Main />,
     children: [
-      { path: '/', element: <Home /> }
+      { path: '/', element: <Home /> },
+      { path: '/chat-ai', element: <ChatAI /> }
     ]
   },
 

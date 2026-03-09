@@ -26,6 +26,7 @@ const Login = () => {
       setLoading(false);
     }
   };
+ 
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
@@ -41,7 +42,9 @@ const Login = () => {
 
         <div className="relative z-10 flex flex-col items-center justify-center min-h-[70vh] md:h-screen p-8">
           <div className="w-full max-w-xl space-y-8">
-            <div className="text-center">
+            <div className="text-center"
+            onClick={() => navigate('/')}
+            >
               <img
                 src="https://i.ibb.co.com/sp5JLnkF/Whats-App-Image-2025-02-22-at-9-25-22-AM-3.png"
                 alt="Logo"
