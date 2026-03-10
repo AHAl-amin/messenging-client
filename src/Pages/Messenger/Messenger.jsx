@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import axios from 'axios';
-import { Send, User as UserIcon, ArrowLeft, LogOut } from 'lucide-react';
+import { Send, User as UserIcon, ArrowLeft, LogOut, Smile, X, CornerUpRight } from 'lucide-react';
 import { FiChevronLeft } from "react-icons/fi";
 
 import { BACKEND_URL } from '../../lib/api';
@@ -24,7 +24,28 @@ const Messenger = () => {
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState('');
     const [onlineUsers, setOnlineUsers] = useState([]);
+    const [replyingTo, setReplyingTo] = useState(null);
+    const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+    const [activeReactionMessageId, setActiveReactionMessageId] = useState(null);
     const messagesEndRef = useRef(null);
+    const emojiPickerRef = useRef(null);
+    const reactionPickerRef = useRef(null);
+
+    const emojis = ['😊', '😂', '❤️', '😍', '👍', '🙌', '😢', '🔥', '😮', '👏', '🤔', '😎', '✨', '🎉', '🙏', '💯'];
+
+    // Close emoji picker when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target)) {
+                setShowEmojiPicker(false);
+            }
+            if (reactionPickerRef.current && !reactionPickerRef.current.contains(event.target)) {
+                setActiveReactionMessageId(null);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
     // Keep a ref to selectedUser so the socket listener always sees the latest value
     const selectedUserRef = useRef(null);
     const currentUserRef = useRef(null);
@@ -32,6 +53,10 @@ const Messenger = () => {
     const selectedUser = selectedUserId ? users.find(u => u.id === selectedUserId) : null;
 
     // Keep refs in sync with state
+
+
+
+
     useEffect(() => {
         console.log('🔄 selectedUserRef updated:', selectedUser?.name);
         selectedUserRef.current = selectedUser;
@@ -148,21 +173,72 @@ const Messenger = () => {
                 console.log('⏭️ Skipping message - not for active conversation');
             }
         };
-
         socket.on('receive_private_message', handlePrivateMessage);
 
-        return () => {
-            socket.off('receive_private_message', handlePrivateMessage);
+        const handleReactionUpdate = ({ messageId, reactions }) => {
+            console.log('✨ Received reaction update:', { messageId, reactions });
+            setMessages(prev => prev.map(m => m.id === messageId ? { ...m, reactions } : m));
         };
-    }, []); // empty deps — refs handle latest values
+        socket.on('update_message_reaction', handleReactionUpdate);
 
+        return () => {
+            console.log('🧹 Cleaning up socket listeners');
+            socket.off('receive_private_message', handlePrivateMessage);
+            socket.off('update_message_reaction', handleReactionUpdate);
+        };
+    }, []);
+
+    const handleReaction = (messageId, emoji) => {
+        if (!currentUser || !selectedUserId) return;
+
+        console.log('✨ Sending reaction:', { messageId, emoji });
+
+        // Optimistic UI update
+        setMessages(prev => prev.map(m => {
+            if (m.id === messageId) {
+                const reactions = [...(m.reactions || [])];
+                const existingIndex = reactions.findIndex(r => r.userId === currentUser.id);
+
+                if (existingIndex > -1) {
+                    if (reactions[existingIndex].emoji === emoji) {
+                        reactions.splice(existingIndex, 1); // Toggle off
+                    } else {
+                        reactions[existingIndex].emoji = emoji; // Update
+                    }
+                } else {
+                    reactions.push({ userId: currentUser.id, emoji }); // Add new
+                }
+                return { ...m, reactions };
+            }
+            return m;
+        }));
+
+        // Send to server
+        socket.emit('message_reaction', {
+            messageId,
+            userId: currentUser.id,
+            emoji,
+            receiverId: selectedUserId
+        });
+
+        setActiveReactionMessageId(null);
+    };
     // Auto-scroll logic
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
-    useEffect(() => {
+    // useEffect(() => {
+    //     scrollToBottom();
+    // }, [messages]);
+
+    const prevMessagesLength = useRef(0);
+
+     useEffect(() => {
+    if (messages.length > prevMessagesLength.current) {
         scrollToBottom();
-    }, [messages]);
+    }
+      prevMessagesLength.current = messages.length;
+     }, [messages]);
 
     // Load chat history when a user is selected
     useEffect(() => {
@@ -197,6 +273,11 @@ const Messenger = () => {
                     receiverId: selectedUser.id,
                     text: inputValue,
                     timestamp: now,
+                    replyTo: replyingTo ? {
+                        id: replyingTo.id,
+                        text: replyingTo.text,
+                        senderName: replyingTo.senderId === currentUser.id ? 'You' : (users.find(u => u.id === replyingTo.senderId)?.name || 'Unknown')
+                    } : null
                 };
                 console.log('✅ Adding optimistic message:', optimisticMsg);
                 setMessages((prev) => [...prev, optimisticMsg]);
@@ -219,13 +300,16 @@ const Messenger = () => {
                 });
 
                 const payload = {
+                    id: optimisticMsg.id,
                     senderId: currentUser.id,
                     receiverId: selectedUser.id,
                     text: inputValue,
+                    replyTo: optimisticMsg.replyTo
                 };
                 console.log('📡 Emitting socket message:', payload);
                 socket.emit('private_message', payload);
                 setInputValue('');
+                setReplyingTo(null);
                 console.log('✅ Message sent successfully, input cleared');
             } catch (error) {
                 console.error('❌ Error sending message:', error);
@@ -369,25 +453,85 @@ const Messenger = () => {
                                     </div>
                                 </div>
                             ) : (
-                                messages.map((msg) => {
+                                messages.map((msg, index) => {
                                     const isMe = msg.senderId === currentUser.id;
+                                         const isTopMessage = index < 2;
+                                    
                                     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                     return (
-                                        <div key={msg.id} className={`flex max-w-[75%] ${isMe ? 'ml-auto justify-end' : 'mr-auto justify-start'}`}>
+                                        <div key={msg.id} className={`flex group max-w-[75%] ${isMe ? 'ml-auto justify-end' : 'mr-auto justify-start'}`}>
                                             {!isMe && (
                                                 <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 flex-shrink-0 flex items-center justify-center text-xs font-bold mr-2 self-end mb-5">
                                                     {(selectedUser?.name || 'Unknown').charAt(0).toUpperCase()}
                                                 </div>
                                             )}
 
-                                            <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
+                                            <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}>
+                                                {/* Hover Actions */}
+                                                <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 ${isMe ? '-left-24' : '-right-24'}`}>
+                                                    {/* Reaction Button */}
+                                                    <button
+                                                        onClick={() => setActiveReactionMessageId(msg.id)}
+                                                        className="p-2 bg-white shadow-md rounded-full text-gray-500 hover:text-blue-600 transition-colors"
+                                                        title="React"
+                                                    >
+                                                        <Smile size={16} />
+                                                    </button>
+
+                                                    {/* Reply Button */}
+                                                    <button
+                                                        onClick={() => {
+                                                            console.log('↩️ Replying to:', msg.text);
+                                                            setReplyingTo(msg);
+                                                        }}
+                                                        className="p-2 bg-white shadow-md rounded-full text-gray-500 hover:text-blue-600 transition-colors"
+                                                        title="Reply"
+                                                    >
+                                                        <CornerUpRight size={16} />
+                                                    </button>
+                                                </div>
+
+                                                {/* Reaction Picker for this message */}
+                                                {activeReactionMessageId === msg.id && (
+                                                    <div className={`absolute  ${
+    isTopMessage ? "top-full mt-2" : "bottom-full mb-2"
+  }   mb-2 p-2 bg-white rounded-2xl shadow-xl border border-gray-200 z-[100] w-48 grid grid-cols-4 gap-1 ${isMe ? 'right-0' : 'left-0'}`} ref={reactionPickerRef}>
+                                                        {emojis.slice(0, 8).map(emoji => (
+                                                            <button
+                                                                key={emoji}
+                                                                onClick={() => handleReaction(msg.id, emoji)}
+                                                                className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 rounded-xl transition-colors text-xl"
+                                                            >
+                                                                {emoji}
+                                                            </button>
+                                                        ))}
+                                                    </div>
+                                                )}
+
                                                 <div
-                                                    className={`px-4 py-2 rounded-2xl ${isMe
+                                                    className={`px-4 py-2 rounded-2xl relative ${isMe
                                                         ? 'bg-blue-600 text-white rounded-br-sm'
                                                         : 'bg-white border border-gray-200 text-gray-800 shadow-sm rounded-bl-sm'
                                                         }`}
                                                 >
+                                                    {/* Quoted Message Preview inside bubble */}
+                                                    {msg.replyTo?.text && (
+                                                        <div className={`mb-2 p-2 rounded-lg text-xs border-l-4 ${isMe ? 'bg-blue-700/50 border-blue-300' : 'bg-gray-100 border-gray-400'} max-w-full overflow-hidden`}>
+                                                            <p className="font-bold mb-1">{msg.replyTo.senderName}</p>
+                                                            <p className="italic truncate">{msg.replyTo.text}</p>
+                                                        </div>
+                                                    )}
                                                     <p className="text-[15px] leading-relaxed break-words">{msg.text}</p>
+
+                                                    {/* Reactions List */}
+                                                    {msg.reactions && msg.reactions.length > 0 && (
+                                                        <div className={`absolute -bottom-5 ${isMe ? 'left-2' : 'right-2'} flex items-center gap-1 bg-white border border-gray-100 shadow-md rounded-full px-1.5 py-0.5 z-10 select-none`}>
+                                                            {Array.from(new Set(msg.reactions.map(r => r.emoji))).slice(0, 3).map((emoji, i) => (
+                                                                <span key={i} className="text-sm cursor-default">{emoji}</span>
+                                                            ))}
+                                                            {msg.reactions.length > 1 && <span className="text-[10px] text-gray-500 font-bold ml-0.5">{msg.reactions.length}</span>}
+                                                        </div>
+                                                    )}
                                                 </div>
                                                 <span className="text-[11px] text-gray-400 mt-1 px-1">
                                                     {timeStr}
@@ -402,13 +546,59 @@ const Messenger = () => {
 
                         {/* Chat Input */}
                         <div className="p-3 bg-white border-t border-gray-200">
+                            {/* Reply Preview Bar */}
+                            {replyingTo && (
+                                <div className="max-w-[796px] mx-auto flex items-center justify-between bg-gray-100 p-2 px-4 rounded-t-xl  mb-0 animate-in slide-in-from-bottom-2">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-blue-600">Replying to {replyingTo.senderId === currentUser.id ? 'yourself' : (users.find(u => u.id === replyingTo.senderId)?.name || 'Unknown')}</p>
+                                        <p className="text-sm text-gray-600 truncate">{replyingTo.text}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => setReplyingTo(null)}
+                                        className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            )}
+
                             <div className="flex items-end gap-2 max-w-4xl mx-auto">
+                                <div className="mb-1 flex items-center gap-1">
+                                    {/* Emoji Picker Button */}
+                                    <div className="relative" ref={emojiPickerRef}>
+                                        <button
+                                            onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                                            className="p-2.5 rounded-full text-gray-500 hover:bg-gray-100 transition-colors"
+                                            title="Add emoji"
+                                        >
+                                            <Smile size={22} className={showEmojiPicker ? "text-blue-600" : ""} />
+                                        </button>
+
+                                        {showEmojiPicker && (
+                                            <div className="absolute bottom-full left-0 mb-2 p-2 bg-white rounded-2xl shadow-xl border border-gray-200 z-50 w-64 grid grid-cols-4 gap-2">
+                                                {emojis.map(emoji => (
+                                                    <button
+                                                        key={emoji}
+                                                        onClick={() => {
+                                                            setInputValue(prev => prev + emoji);
+                                                            // Optional: hide after click or keep open
+                                                        }}
+                                                        className="text-2xl p-2 hover:bg-blue-50 rounded-xl transition-colors"
+                                                    >
+                                                        {emoji}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
                                 <div className="flex-1 relative">
                                     <textarea
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
                                         placeholder="Aa"
-                                        className="w-full bg-gray-100 border-none rounded-3xl py-3 pl-4 pr-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[15px] leading-tight max-h-32 min-h-[44px]"
+                                        className={`w-full bg-gray-100 border-none ${replyingTo ? 'rounded-b-3xl' : 'rounded-3xl'} py-3 pl-4 pr-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[15px] leading-tight max-h-32 min-h-[44px]`}
                                         rows={1}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter' && !e.shiftKey) {
@@ -428,7 +618,17 @@ const Messenger = () => {
                             </div>
                         </div>
                     </>
-                ) : null}
+                ) : (
+                    <div className="hidden md:flex flex-1 flex-col items-center justify-center bg-gray-50">
+                        <div className="text-center p-8 bg-white rounded-3xl shadow-sm border border-gray-100 max-w-sm">
+                            <div className="w-20 h-20 bg-blue-50 text-blue-500 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <UserIcon size={40} />
+                            </div>
+                            <h3 className="text-xl font-bold text-gray-800 mb-2">Your Messages</h3>
+                            <p className="text-gray-500">Select a person from the left to start a conversation or continue an old one.</p>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     );
