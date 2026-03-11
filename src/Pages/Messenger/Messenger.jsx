@@ -12,15 +12,17 @@ const socket = io(BACKEND_URL);
 console.log('Messenger component loaded, BACKEND_URL:', BACKEND_URL);
 
 // Add socket connection logging
-socket.on('connect', () => console.log('✅ Socket connected:', socket.id));
-socket.on('disconnect', () => console.log('❌ Socket disconnected'));
-socket.on('connect_error', (error) => console.error('❌ Socket connection error:', error));
+socket.on('connect', () => console.log(' Socket connected:', socket.id));
+socket.on('disconnect', () => console.log(' Socket disconnected'));
+socket.on('connect_error', (error) => console.error(' Socket connection error:', error));
 
 const Messenger = () => {
     const navigate = useNavigate();
     const [currentUser, setCurrentUser] = useState(null);
+    const [searchTerm, setSearchTerm] = useState('');
     const [users, setUsers] = useState([]);
     const [selectedUserId, setSelectedUserId] = useState(null);
+    const [isUsersLoading, setIsUsersLoading] = useState(true);
     const [messages, setMessages] = useState([]);
     const [inputValue, setInputValue] = useState('');
     const [onlineUsers, setOnlineUsers] = useState([]);
@@ -51,6 +53,10 @@ const Messenger = () => {
     const currentUserRef = useRef(null);
 
     const selectedUser = selectedUserId ? users.find(u => u.id === selectedUserId) : null;
+
+    const filteredUsers = users.filter(user =>
+    user.name.toLowerCase().includes(searchTerm.toLowerCase())
+);
 
     // Keep refs in sync with state
 
@@ -87,6 +93,8 @@ const Messenger = () => {
         // Load available users
         const fetchUsers = async () => {
             try {
+
+                setIsUsersLoading(true);
                 const res = await axios.get(`${BACKEND_URL}/users?currentUserId=${user.id}`);
                 const filteredUsers = res.data.filter(u => u.id !== user.id);
                 console.log('👥 Users loaded:', filteredUsers.map(u => u.name));
@@ -106,7 +114,9 @@ const Messenger = () => {
                     }
                 }
             } catch (err) {
-                console.error('❌ Error fetching users', err);
+                console.error(' Error fetching users', err);
+            } finally {
+                setIsUsersLoading(false);
             }
         };
         fetchUsers();
@@ -233,12 +243,12 @@ const Messenger = () => {
 
     const prevMessagesLength = useRef(0);
 
-     useEffect(() => {
-    if (messages.length > prevMessagesLength.current) {
-        scrollToBottom();
-    }
-      prevMessagesLength.current = messages.length;
-     }, [messages]);
+    useEffect(() => {
+        if (messages.length > prevMessagesLength.current) {
+            scrollToBottom();
+        }
+        prevMessagesLength.current = messages.length;
+    }, [messages]);
 
     // Load chat history when a user is selected
     useEffect(() => {
@@ -363,19 +373,37 @@ const Messenger = () => {
 
                 {/* User Search (Placeholder UI) */}
                 <div className="p-3">
-                    <input
-                        type="text"
-                        placeholder="Search users..."
-                        className="w-full bg-gray-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                    />
+                  <input
+    type="text"
+    placeholder="Search users..."
+    value={searchTerm}
+    onChange={(e) => setSearchTerm(e.target.value)}
+    className="w-full bg-gray-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+/>
                 </div>
 
                 {/* User List */}
                 <div className="flex-1 overflow-y-auto">
-                    {users.length === 0 && (
-                        <p className="p-4 text-center text-gray-400 text-sm">No other users found. Register another account to chat!</p>
-                    )}
-                    {users.map((user) => {
+                {isUsersLoading ? (
+                   <p className="p-4 text-center text-gray-400 text-sm">
+                      Loading users...
+                             </p>
+                          ) : filteredUsers.length === 0 ? (
+                             <p className="p-4 text-center text-gray-400 text-sm">
+                              No users found.
+                              </p>
+                            ) : (
+                                 filteredUsers.map((user) => {
+                              const isOnline = onlineUsers.includes(user.id)
+
+                                     return (
+                                        <div key={user.id}>
+            
+                                           </div>
+                                             )
+                                             })
+                                          )}
+                    {filteredUsers.map((user) => {
                         const isOnline = onlineUsers.includes(user.id);
                         return (
                             <div
@@ -455,8 +483,8 @@ const Messenger = () => {
                             ) : (
                                 messages.map((msg, index) => {
                                     const isMe = msg.senderId === currentUser.id;
-                                         const isTopMessage = index < 2;
-                                    
+                                    const isTopMessage = index < 2;
+
                                     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                                     return (
                                         <div key={msg.id} className={`flex group max-w-[75%] ${isMe ? 'ml-auto justify-end' : 'mr-auto justify-start'}`}>
@@ -493,9 +521,8 @@ const Messenger = () => {
 
                                                 {/* Reaction Picker for this message */}
                                                 {activeReactionMessageId === msg.id && (
-                                                    <div className={`absolute  ${
-    isTopMessage ? "top-full mt-2" : "bottom-full mb-2"
-  }   mb-2 p-2 bg-white rounded-2xl shadow-xl border border-gray-200 z-[100] w-48 grid grid-cols-4 gap-1 ${isMe ? 'right-0' : 'left-0'}`} ref={reactionPickerRef}>
+                                                    <div className={`absolute  ${isTopMessage ? "top-full mt-2" : "bottom-full mb-2"
+                                                        }   mb-2 p-2 bg-white rounded-2xl shadow-xl border border-gray-200 z-[100] w-48 grid grid-cols-4 gap-1 ${isMe ? 'right-0' : 'left-0'}`} ref={reactionPickerRef}>
                                                         {emojis.slice(0, 8).map(emoji => (
                                                             <button
                                                                 key={emoji}
