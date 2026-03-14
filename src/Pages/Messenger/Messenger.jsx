@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import io from 'socket.io-client';
 import axios from 'axios';
-import { Send, User as UserIcon, ArrowLeft, LogOut, Smile, X, CornerUpRight } from 'lucide-react';
+import { Send, User as UserIcon, ArrowLeft, LogOut, Smile, X, CornerUpRight, Edit2, Trash2 } from 'lucide-react';
 import { FiChevronLeft } from "react-icons/fi";
 
 import { BACKEND_URL } from '../../lib/api';
@@ -27,6 +27,7 @@ const Messenger = () => {
     const [inputValue, setInputValue] = useState('');
     const [onlineUsers, setOnlineUsers] = useState([]);
     const [replyingTo, setReplyingTo] = useState(null);
+    const [editingMessageId, setEditingMessageId] = useState(null);
     const [showEmojiPicker, setShowEmojiPicker] = useState(false);
     const [activeReactionMessageId, setActiveReactionMessageId] = useState(null);
     const messagesEndRef = useRef(null);
@@ -191,10 +192,24 @@ const Messenger = () => {
         };
         socket.on('update_message_reaction', handleReactionUpdate);
 
+        const handleMessageSoftDeleted = ({ messageId, text }) => {
+            console.log('🗑️ Received message_soft_deleted:', messageId);
+            setMessages(prev => prev.map(m => m.id === messageId ? { ...m, text, isDeleted: true, reactions: [], isEdited: false } : m));
+        };
+        socket.on('message_soft_deleted', handleMessageSoftDeleted);
+
+        const handleMessageEdited = ({ messageId, text, isEdited }) => {
+            console.log('✏️ Received message_edited:', { messageId, text });
+            setMessages(prev => prev.map(m => m.id === messageId ? { ...m, text, isEdited } : m));
+        };
+        socket.on('message_edited', handleMessageEdited);
+
         return () => {
             console.log('🧹 Cleaning up socket listeners');
             socket.off('receive_private_message', handlePrivateMessage);
             socket.off('update_message_reaction', handleReactionUpdate);
+            socket.off('message_soft_deleted', handleMessageSoftDeleted);
+            socket.off('message_edited', handleMessageEdited);
         };
     }, []);
 
@@ -233,6 +248,29 @@ const Messenger = () => {
 
         setActiveReactionMessageId(null);
     };
+
+    const handleDeleteMessage = (messageId) => {
+        if (!currentUser || !selectedUserId) return;
+        
+        console.log('🗑️ Deleting message:', messageId);
+        
+        // Optimistic UI update (soft delete)
+        setMessages(prev => prev.map(m => m.id === messageId ? { ...m, text: 'This message was deleted', isDeleted: true, reactions: [], isEdited: false } : m));
+        
+        // Send to server
+        socket.emit('delete_message', {
+            messageId,
+            userId: currentUser.id,
+            receiverId: selectedUserId
+        });
+    };
+
+    const handleEditMessage = (message) => {
+        setEditingMessageId(message.id);
+        setInputValue(message.text);
+        setReplyingTo(null); // Cancel reply if we start editing
+    };
+
     // Auto-scroll logic
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -276,6 +314,24 @@ const Messenger = () => {
 
         if (inputValue.trim() !== '' && selectedUser && currentUser) {
             try {
+                if (editingMessageId) {
+                    console.log('✏️ Editing existing message:', editingMessageId);
+                    
+                    // Optimistic UI update
+                    setMessages(prev => prev.map(m => m.id === editingMessageId ? { ...m, text: inputValue, isEdited: true } : m));
+                    
+                    socket.emit('edit_message', {
+                        messageId: editingMessageId,
+                        userId: currentUser.id,
+                        receiverId: selectedUser.id,
+                        newText: inputValue
+                    });
+                    
+                    setInputValue('');
+                    setEditingMessageId(null);
+                    return;
+                }
+
                 const now = new Date().toISOString();
                 const optimisticMsg = {
                     id: Date.now().toString(),
@@ -374,11 +430,11 @@ const Messenger = () => {
                 {/* User Search (Placeholder UI) */}
                 <div className="p-3">
                   <input
-    type="text"
-    placeholder="Search users..."
-    value={searchTerm}
-    onChange={(e) => setSearchTerm(e.target.value)}
-    className="w-full bg-gray-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+                   type="text"
+                     placeholder="Search users..."
+                          value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+               className="w-full bg-gray-100 border-none rounded-full px-4 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none transition-all"
 />
                 </div>
 
@@ -396,7 +452,7 @@ const Messenger = () => {
                                  filteredUsers.map((user) => {
                               const isOnline = onlineUsers.includes(user.id)
 
-                                     return (
+                                     return ( 
                                         <div key={user.id}>
             
                                            </div>
@@ -469,7 +525,7 @@ const Messenger = () => {
                         </div>
 
                         {/* Chat Messages */}
-                        <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4">
+                        <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 bg-gray-50 space-y-4">
                             {messages.length === 0 ? (
                                 <div className="h-full flex items-center justify-center">
                                     <div className="text-center p-6 bg-white rounded-2xl shadow-sm border border-gray-100 max-w-sm">
@@ -496,7 +552,7 @@ const Messenger = () => {
 
                                             <div className={`flex flex-col ${isMe ? 'items-end' : 'items-start'} relative`}>
                                                 {/* Hover Actions */}
-                                                <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 ${isMe ? '-left-24' : '-right-24'}`}>
+                                                <div className="absolute -top-6 right-0 -translate-x-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10 ">
                                                     {/* Reaction Button */}
                                                     <button
                                                         onClick={() => setActiveReactionMessageId(msg.id)}
@@ -517,6 +573,28 @@ const Messenger = () => {
                                                     >
                                                         <CornerUpRight size={16} />
                                                     </button>
+                                                    
+                                                    {isMe && !msg.isDeleted && (
+                                                        <>
+                                                            {/* Edit Button */}
+                                                            <button
+                                                                onClick={() => handleEditMessage(msg)}
+                                                                className="p-2 bg-white shadow-md rounded-full text-gray-500 hover:text-blue-600 transition-colors"
+                                                                title="Edit"
+                                                            >
+                                                                <Edit2 size={16} />
+                                                            </button>
+                                                            
+                                                            {/* Delete Button */}
+                                                            <button
+                                                                onClick={() => handleDeleteMessage(msg.id)}
+                                                                className="p-2 bg-white shadow-md rounded-full text-gray-500 hover:text-red-500 transition-colors"
+                                                                title="Delete"
+                                                            >
+                                                                <Trash2 size={16} />
+                                                            </button>
+                                                        </>
+                                                    )}
                                                 </div>
 
                                                 {/* Reaction Picker for this message */}
@@ -543,18 +621,32 @@ const Messenger = () => {
                                                 >
                                                     {/* Quoted Message Preview inside bubble */}
                                                     {msg.replyTo?.text && (
-                                                        <div className={`mb-2 p-2 rounded-lg text-xs border-l-4 ${isMe ? 'bg-blue-700/50 border-blue-300' : 'bg-gray-100 border-gray-400'} max-w-full overflow-hidden`}>
+                                                        <div className={`mb-2 p-2 rounded-lg text-xs border-l-4 ${isMe ? 'bg-blue-700/50 border-blue-300' : 'bg-gray-100 border-gray-400'} max-w-full lg:max-w-md overflow-hidden`}>
                                                             <p className="font-bold mb-1">{msg.replyTo.senderName}</p>
-                                                            <p className="italic truncate">{msg.replyTo.text}</p>
+                                                            <p className="italic break-words whitespace-normal line-clamp-3">{msg.replyTo.text}</p>
                                                         </div>
                                                     )}
-                                                    <p className="text-[15px] leading-relaxed break-words">{msg.text}</p>
+                                                    <p className={`text-[15px] leading-relaxed break-words ${msg.isDeleted ? 'italic text-gray-400 font-medium' : ''}`}>
+                                                        {msg.isDeleted ? '🚫 ' : ''}{msg.text}
+                                                        {msg.isEdited && !msg.isDeleted && <span className="text-[10px] opacity-70 ml-2 italic">(edited)</span>}
+                                                    </p>
 
                                                     {/* Reactions List */}
                                                     {msg.reactions && msg.reactions.length > 0 && (
                                                         <div className={`absolute -bottom-5 ${isMe ? 'left-2' : 'right-2'} flex items-center gap-1 bg-white border border-gray-100 shadow-md rounded-full px-1.5 py-0.5 z-10 select-none`}>
                                                             {Array.from(new Set(msg.reactions.map(r => r.emoji))).slice(0, 3).map((emoji, i) => (
-                                                                <span key={i} className="text-sm cursor-default">{emoji}</span>
+                                                                <span 
+                                                                    key={i} 
+                                                                    className={`text-sm ${msg.reactions.some(r => r.emoji === emoji && r.userId === currentUser.id) ? 'cursor-pointer hover:scale-110' : 'cursor-default'} transition-transform`}
+                                                                    title={msg.reactions.some(r => r.emoji === emoji && r.userId === currentUser.id) ? "Click to remove" : ""}
+                                                                    onClick={() => {
+                                                                        if (msg.reactions.some(r => r.emoji === emoji && r.userId === currentUser.id)) {
+                                                                            handleReaction(msg.id, emoji);
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    {emoji}
+                                                                </span>
                                                             ))}
                                                             {msg.reactions.length > 1 && <span className="text-[10px] text-gray-500 font-bold ml-0.5">{msg.reactions.length}</span>}
                                                         </div>
@@ -574,15 +666,33 @@ const Messenger = () => {
                         {/* Chat Input */}
                         <div className="p-3 bg-white border-t border-gray-200">
                             {/* Reply Preview Bar */}
-                            {replyingTo && (
-                                <div className="max-w-[796px] mx-auto flex items-center justify-between bg-gray-100 p-2 px-4 rounded-t-xl  mb-0 animate-in slide-in-from-bottom-2">
-                                    <div className="flex-1 min-w-0">
+                            {replyingTo && !editingMessageId && (
+                                <div className="w-full max-w-[796px] mx-auto flex items-center justify-between bg-gray-100 p-2 px-4 rounded-t-xl mb-0 animate-in slide-in-from-bottom-2">
+                                    <div className="flex-1 min-w-0 pr-2">
                                         <p className="text-xs font-bold text-blue-600">Replying to {replyingTo.senderId === currentUser.id ? 'yourself' : (users.find(u => u.id === replyingTo.senderId)?.name || 'Unknown')}</p>
-                                        <p className="text-sm text-gray-600 truncate">{replyingTo.text}</p>
+                                        <p className="text-sm text-gray-600 break-words whitespace-normal line-clamp-3">{replyingTo.text}</p>
                                     </div>
                                     <button
                                         onClick={() => setReplyingTo(null)}
-                                        className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                                        className="p-1 hover:bg-gray-200 rounded-full transition-colors flex-shrink-0"
+                                    >
+                                        <X size={16} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Edit Preview Bar */}
+                            {editingMessageId && (
+                                <div className="max-w-[796px] mx-auto flex items-center justify-between bg-yellow-50 p-2 px-4 rounded-t-xl  mb-0 animate-in slide-in-from-bottom-2">
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-xs font-bold text-yellow-600 flex items-center gap-1"><Edit2 size={12} /> Editing Message</p>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            setEditingMessageId(null);
+                                            setInputValue('');
+                                        }}
+                                        className="p-1 hover:bg-yellow-100 text-yellow-700 rounded-full transition-colors"
                                     >
                                         <X size={16} />
                                     </button>
@@ -625,7 +735,7 @@ const Messenger = () => {
                                         value={inputValue}
                                         onChange={(e) => setInputValue(e.target.value)}
                                         placeholder="Aa"
-                                        className={`w-full bg-gray-100 border-none ${replyingTo ? 'rounded-b-3xl' : 'rounded-3xl'} py-3 pl-4 pr-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[15px] leading-tight max-h-32 min-h-[44px]`}
+                                        className={`w-full ${editingMessageId ? 'bg-yellow-50 pr-4' : 'bg-gray-100'} border-none ${replyingTo || editingMessageId ? 'rounded-b-3xl' : 'rounded-3xl'} py-3 pl-4 pr-4 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-[15px] leading-tight max-h-32 min-h-[44px]`}
                                         rows={1}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter' && !e.shiftKey) {
